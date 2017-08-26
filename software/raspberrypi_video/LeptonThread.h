@@ -43,6 +43,8 @@ private:
 
   uint8_t result[PACKET_SIZE*PACKETS_PER_FRAME];
   uint16_t *frameBuffer;
+  long long currFrameTime;
+  long long lastFrameTime;
 
   MQTTAsync client;
   int token;
@@ -50,7 +52,6 @@ private:
   char frameStr[MQTT_PAYLOAD_SIZE];
 
   int frameBufferToString(char* output, int output_length);
-
   void setupMQTT(void);
   void publishFrame(void);
 };

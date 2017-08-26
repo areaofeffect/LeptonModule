@@ -16,7 +16,7 @@ int main( int argc, char **argv )
 {
 	//create the app
 	QApplication a( argc, argv );
-	
+
 	QWidget *myWidget = new QWidget;
 	myWidget->setGeometry(400, 300, 340, 290);
 

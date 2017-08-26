@@ -6,6 +6,7 @@
 #include <MQTTAsync.h>
 #include <assert.h>
 #include <time.h>
+#include <QByteArray>
 
 //#include <OsWrapper.h>
 
@@ -14,13 +15,13 @@
 #define PACKET_SIZE_UINT16 (PACKET_SIZE/2)
 #define PACKETS_PER_FRAME 60
 #define FRAME_SIZE_UINT16 (PACKET_SIZE_UINT16*PACKETS_PER_FRAME)
-#define FPS 27;
+#define FPS 10
 
 // MQTT
 #define ADDRESS     "tcp://144.121.64.136:1883"
 #define CLIENTID    "LeptonPi"
-#define TOPIC       "Lepton"
-#define QOS         1
+#define TOPIC       "lepton"
+#define QOS         0
 #define TIMEOUT     10000L
 
 extern "C" {
@@ -31,6 +32,7 @@ extern "C" {
   void onSend(void* context, MQTTAsync_successData* response);
   void onConnectFailure(void* context, MQTTAsync_failureData* response);
   void onConnect(void* context, MQTTAsync_successData* response);
+  long long getCurrSecsPlusMillis(void);
 }
 
 
@@ -67,19 +69,11 @@ void onDisconnect(void* context, MQTTAsync_successData* response)
 void onSend(void* context, MQTTAsync_successData* response)
 {
   (void) response;
+  (void) context;
   
-  if ((++deliveredMsgs % 100) == 0) {
-    long            ms; // Milliseconds
-    time_t          s;  // Seconds
-    struct timespec spec;
-  
-    clock_gettime(CLOCK_REALTIME, &spec);
-  
-    s  = spec.tv_sec;
-    ms = round(spec.tv_nsec / 1.0e6); // Convert nanoseconds to milliseconds
-  
-    printf("%lld.%03ld: delivered %d messages\n",
-           (intmax_t)s, ms, deliveredMsgs);
+  if ((++deliveredMsgs % 10) == 0) {
+    printf("%lld: delivered %d messages\n",
+           getCurrSecsPlusMillis(), deliveredMsgs);
   }
   //printf("Message with token value %d delivery confirmed\n", response->token);
 }
@@ -100,6 +94,20 @@ void onConnect(void* context, MQTTAsync_successData* response)
 }
 
 // END MQTT CALLBACKS --------------------------
+
+long long getCurrSecsPlusMillis(void) {
+  long            ms; // Milliseconds
+  time_t          s;  // Seconds
+  struct timespec spec;
+  
+  clock_gettime(CLOCK_REALTIME, &spec);
+  
+  s  = spec.tv_sec;
+  ms = round(spec.tv_nsec / 1.0e6); // Convert nanoseconds to milliseconds
+
+  return ((long long)s)*1000LL + (long long)ms;
+}
+
 
 
 //from: https://stackoverflow.com/questions/2056499/transform-an-array-of-integers-into-a-string?rq=1
@@ -158,23 +166,21 @@ void LeptonThread::setupMQTT(void)
 //from: https://stackoverflow.com/questions/3756323/getting-the-current-time-in-milliseconds
 void LeptonThread::publishFrame(void)
 {
-  int strIdx = 0;
-  long            ms; // Milliseconds
-  time_t          s;  // Seconds
-  struct timespec spec;
-  
-  clock_gettime(CLOCK_REALTIME, &spec);
-  
-  s  = spec.tv_sec;
-  ms = round(spec.tv_nsec / 1.0e6); // Convert nanoseconds to milliseconds
-  
-  strIdx = sprintf(frameStr, "base_id/0/timestamp/%lld.%03ld/pixels/",
-          (intmax_t)s, ms);
+  int strIdx = sprintf(frameStr, "base_id|001|timestamp|%lld|pixels|",
+                          currFrameTime);
 
-  frameBufferToString(frameStr + strIdx,  MQTT_PAYLOAD_SIZE - strIdx);
+  int frameStrLen = frameBufferToString(frameStr + strIdx,  MQTT_PAYLOAD_SIZE - strIdx);
+  QByteArray frameStrBytes(frameStr + strIdx, frameStrLen);
+  QByteArray compressedBytes = qCompress(frameStrBytes).toBase64();
+  qstrncpy(frameStr + strIdx, compressedBytes, compressedBytes.size());
+  
+  //  printf("About to send frame with %d compressed (%d uncompressed) bytes\n",
+  //     compressedBytes.size(), frameStrLen);
 
-  //printf("About to send: %s\n", frameStr);
+  //    printf("About to send frame with %d compressed / %d uncompressed bytes: %s\n",
+  //     compressedBytes.size(), frameStrLen, frameStr);
 
+ 
   // Prepare to get the reponse and then send
   MQTTAsync_responseOptions opts = MQTTAsync_responseOptions_initializer;
 	MQTTAsync_message pubmsg = MQTTAsync_message_initializer;
@@ -219,7 +225,7 @@ void LeptonThread::run()
 	//open spi port
 	SpiOpenPort(0);
 
-	while(true) {
+	while(true) {    
 		//read data packets from lepton over SPI
 		int resets = 0;
 		for(int j=0;j<PACKETS_PER_FRAME;j++) {
@@ -240,13 +246,19 @@ void LeptonThread::run()
 					SpiOpenPort(0);
 				}
 			}
+      else if(packetNumber == 0)
+        currFrameTime = getCurrSecsPlusMillis();
 		}
 		if(resets >= 30) {
 			qDebug() << "done reading, resets: " << resets;
 		}
 
+    
+    if(currFrameTime < (lastFrameTime + 1000/FPS))
+      continue;
+
+       
 		frameBuffer = (uint16_t *)result;
-		int row, column;
 		uint16_t value;
 		uint16_t minValue = 65535;
 		uint16_t maxValue = 0;
@@ -262,7 +274,8 @@ void LeptonThread::run()
 			int temp = result[i*2];
 			result[i*2] = result[i*2+1];
 			result[i*2+1] = temp;
-			
+
+      
 			value = frameBuffer[i];
 			if(value > maxValue) {
 				maxValue = value;
@@ -270,8 +283,6 @@ void LeptonThread::run()
 			if(value < minValue) {
 				minValue = value;
 			}
-			column = i % PACKET_SIZE_UINT16 - 2;
-			row = i / PACKET_SIZE_UINT16 ;
 		}
 
     // Publish this frame asyncrhonously over MQTT. The buffer is copied
@@ -279,7 +290,11 @@ void LeptonThread::run()
     if (MQTTAsync_isConnected(client)) {
         publishFrame();
       }
-      
+    
+    lastFrameTime = currFrameTime;
+
+
+    /*
 		float diff = maxValue - minValue;
 		float scale = 255/diff;
 		QRgb color;
@@ -297,7 +312,7 @@ void LeptonThread::run()
 
 		//lets emit the signal for update
 		emit updateImage(myImage);
-
+    */
 	}
 	
 	//finally, close SPI port just bcuz
