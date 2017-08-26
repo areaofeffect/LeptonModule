@@ -11,6 +11,11 @@
 
 #include <MQTTAsync.h>
 
+#define DISPLAY_IMAGE 0
+#define PUBLISH_MQTT 0
+#define LOG_FRAMES 1
+
+
 #define PACKET_SIZE 164
 #define PACKET_SIZE_UINT16 (PACKET_SIZE/2)
 #define PACKETS_PER_FRAME 60
@@ -46,14 +51,18 @@ private:
   long long currFrameTime;
   long long lastFrameTime;
 
+  char frameStr[MQTT_PAYLOAD_SIZE];
+  int frameBufferToString(char* output, int output_length);
+
   MQTTAsync client;
   int token;
   MQTTAsync_connectOptions conn_opts;
-  char frameStr[MQTT_PAYLOAD_SIZE];
-
-  int frameBufferToString(char* output, int output_length);
   void setupMQTT(void);
   void publishFrame(void);
+
+  char logFileName[1024];
+  FILE *logFile;
+  void writeFrameToLog(void);
 };
 
 #endif

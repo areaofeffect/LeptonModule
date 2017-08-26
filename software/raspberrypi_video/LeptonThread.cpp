@@ -7,7 +7,6 @@
 #include <assert.h>
 #include <time.h>
 #include <QByteArray>
-
 //#include <OsWrapper.h>
 
 // LeptonThred 
@@ -23,6 +22,9 @@
 #define TOPIC       "lepton"
 #define QOS         0
 #define TIMEOUT     10000L
+
+const static char *DIR_FORMAT =  "/home/pi/lepton-data/%G_%m_%d_%H";
+const static char *FILE_FORMAT =  "/home/pi/lepton-data/%G_%m_%d_%H/%G_%m_%d_%H_%M.csv";
 
 extern "C" {
   volatile MQTTAsync_token deliveredtoken;
@@ -44,7 +46,7 @@ void connlost(void *context, char *cause)
 	MQTTAsync client = (MQTTAsync)context;
 	MQTTAsync_connectOptions conn_opts = MQTTAsync_connectOptions_initializer;
 	int rc;
-
+ 
 	printf("\nConnection lost\n");
 	printf("     cause: %s\n", cause);
 
@@ -52,11 +54,11 @@ void connlost(void *context, char *cause)
 	conn_opts.keepAliveInterval = 20;
 	conn_opts.cleansession = 1;
 	if ((rc = MQTTAsync_connect(client, &conn_opts)) != MQTTASYNC_SUCCESS)
-	{
-		printf("Failed to start connect, return code %d\n", rc);
-	}
-}
-
+    {
+      printf("Failed to start connect, return code %d\n", rc);
+    }
+ }
+ 
 
 void onDisconnect(void* context, MQTTAsync_successData* response)
 {
@@ -78,7 +80,7 @@ void onSend(void* context, MQTTAsync_successData* response)
   //printf("Message with token value %d delivery confirmed\n", response->token);
 }
 
-
+ 
 void onConnectFailure(void* context, MQTTAsync_failureData* response)
 {
   (void) context;
@@ -95,7 +97,8 @@ void onConnect(void* context, MQTTAsync_successData* response)
 
 // END MQTT CALLBACKS --------------------------
 
-long long getCurrSecsPlusMillis(void) {
+long long getCurrSecsPlusMillis(void)
+{
   long            ms; // Milliseconds
   time_t          s;  // Seconds
   struct timespec spec;
@@ -147,7 +150,7 @@ int LeptonThread::frameBufferToString(char* output, int output_length)
   return written;
 }
 
-void LeptonThread::setupMQTT(void)
+ void LeptonThread::setupMQTT(void)
 {
   conn_opts = MQTTAsync_connectOptions_initializer;
 	
@@ -201,8 +204,58 @@ void LeptonThread::publishFrame(void)
 	}
 }
 
+
+
+void LeptonThread::writeFrameToLog()
+{
+  char correctFileName[1024];
+  char dirName[1024];
+  char sysCall[1024];
+  time_t t = (time_t)(currFrameTime / 1000LL);
+
+  if (strftime(dirName, sizeof(dirName), DIR_FORMAT, gmtime(&t)) == 0) {
+    (void) fprintf(stderr,  "strftime(3): cannot format supplied "
+                   "date/time into buffer of size %u using: '%s'\n",
+                   sizeof(dirName), DIR_FORMAT);
+    return;
+  }
+
+  if (strftime(correctFileName, sizeof(correctFileName), FILE_FORMAT, gmtime(&t)) == 0) {
+    (void) fprintf(stderr,  "strftime(3): cannot format supplied "
+                   "date/time into buffer of size %u using: '%s'\n",
+                   sizeof(correctFileName), FILE_FORMAT);
+    return;
+  }
+
+  // Is it time for a new file?
+  if(strcmp(correctFileName, logFileName))
+    {
+      printf("Opening %s for logging.\n", correctFileName);
+      int errno;
+      
+      //Yes, close the current file
+      if(logFile != NULL)
+        fclose(logFile);
+
+      sprintf(sysCall, "mkdir -p %s", dirName);
+      system(sysCall);
+
+      //Open the new file
+      logFile = fopen(correctFileName, "w");
+      if(logFile == NULL)
+        return;
+      
+      strncpy(logFileName, correctFileName, sizeof(logFileName));
+    }
+  
+  int strIdx = sprintf(frameStr, "001, %lld, ", currFrameTime);
+  frameBufferToString(frameStr + strIdx,  MQTT_PAYLOAD_SIZE - strIdx);
+  fprintf(logFile, "%s\n", frameStr);
+}
+
 LeptonThread::LeptonThread() : QThread()
 {
+  logFile = NULL;
   setupMQTT();
 }
 
@@ -211,6 +264,7 @@ LeptonThread::~LeptonThread() {
 
 void LeptonThread::run()
 {
+#if PUBLISH_MQTTT
   int rc;
   
   if ((rc = MQTTAsync_connect(client, &conn_opts)) != MQTTASYNC_SUCCESS)
@@ -218,10 +272,13 @@ void LeptonThread::run()
 		printf("Failed to start connect, return code %d\n", rc);
 		exit(EXIT_FAILURE);
 	}
+#endif //PUBLISH_MQTT
 
+#if DISPLAY_IMAGE
 	//create the initial image
 	myImage = QImage(80, 60, QImage::Format_RGB888);
-
+#endif
+  
 	//open spi port
 	SpiOpenPort(0);
 
@@ -254,15 +311,13 @@ void LeptonThread::run()
 		}
 
     
-    if(currFrameTime < (lastFrameTime + 1000/FPS))
+    if((double)currFrameTime < ((double)lastFrameTime + 1000.0F/(double)FPS))
       continue;
 
-       
 		frameBuffer = (uint16_t *)result;
 		uint16_t value;
 		uint16_t minValue = 65535;
 		uint16_t maxValue = 0;
-
 		
 		for(int i=0;i<FRAME_SIZE_UINT16;i++) {
 			//skip the first 2 uint16_t's of every packet, they're 4 header bytes
@@ -285,16 +340,22 @@ void LeptonThread::run()
 			}
 		}
 
+#if PUBLISH_MQTT
     // Publish this frame asyncrhonously over MQTT. The buffer is copied
     // by the MQTT library.
     if (MQTTAsync_isConnected(client)) {
         publishFrame();
       }
+#endif
+
+#if LOG_FRAMES
+    writeFrameToLog();
+#endif
     
     lastFrameTime = currFrameTime;
 
 
-    /*
+#if DISPLAY_IMAGE
 		float diff = maxValue - minValue;
 		float scale = 255/diff;
 		QRgb color;
@@ -312,13 +373,16 @@ void LeptonThread::run()
 
 		//lets emit the signal for update
 		emit updateImage(myImage);
-    */
+#endif // DISPLAY_IMAGE
+    
 	}
 	
 	//finally, close SPI port just bcuz
 	SpiClosePort(0);
 
+#if PUBLISH_MQTT
   MQTTAsync_destroy(&client);
+#endif
 }
 
 void LeptonThread::performFFC() {
