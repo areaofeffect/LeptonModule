@@ -30,6 +30,8 @@ class LeptonThread : public QThread
   Q_OBJECT;
 
 public:
+  static int baseID;
+
   LeptonThread();
   ~LeptonThread();
 
@@ -50,6 +52,7 @@ private:
   uint16_t *frameBuffer;
   long long currFrameTime;
   long long lastFrameTime;
+  long long frameDelay;
 
   char frameStr[MQTT_PAYLOAD_SIZE];
   int frameBufferToString(char* output, int output_length);

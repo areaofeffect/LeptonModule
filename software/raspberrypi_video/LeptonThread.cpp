@@ -112,6 +112,7 @@ long long getCurrSecsPlusMillis(void)
 }
 
 
+int LeptonThread::baseID = 0;
 
 //from: https://stackoverflow.com/questions/2056499/transform-an-array-of-integers-into-a-string?rq=1
 int LeptonThread::frameBufferToString(char* output, int output_length)
@@ -169,8 +170,8 @@ int LeptonThread::frameBufferToString(char* output, int output_length)
 //from: https://stackoverflow.com/questions/3756323/getting-the-current-time-in-milliseconds
 void LeptonThread::publishFrame(void)
 {
-  int strIdx = sprintf(frameStr, "base_id|001|timestamp|%lld|pixels|",
-                          currFrameTime);
+  int strIdx = sprintf(frameStr, "base_id|%03d|timestamp|%lld|pixels|",
+                       baseID, currFrameTime);
 
   int frameStrLen = frameBufferToString(frameStr + strIdx,  MQTT_PAYLOAD_SIZE - strIdx);
   QByteArray frameStrBytes(frameStr + strIdx, frameStrLen);
@@ -231,8 +232,7 @@ void LeptonThread::writeFrameToLog()
   if(strcmp(correctFileName, logFileName))
     {
       printf("Opening %s for logging.\n", correctFileName);
-      int errno;
-      
+            
       //Yes, close the current file
       if(logFile != NULL)
         fclose(logFile);
@@ -248,7 +248,7 @@ void LeptonThread::writeFrameToLog()
       strncpy(logFileName, correctFileName, sizeof(logFileName));
     }
   
-  int strIdx = sprintf(frameStr, "001, %lld, ", currFrameTime);
+  int strIdx = sprintf(frameStr, "%03d, %lld, ", baseID, currFrameTime);
   frameBufferToString(frameStr + strIdx,  MQTT_PAYLOAD_SIZE - strIdx);
   fprintf(logFile, "%s\n", frameStr);
 }
@@ -256,6 +256,8 @@ void LeptonThread::writeFrameToLog()
 LeptonThread::LeptonThread() : QThread()
 {
   logFile = NULL;
+  lastFrameTime = getCurrSecsPlusMillis();
+  frameDelay = 0;
   setupMQTT();
 }
 
@@ -310,10 +312,14 @@ void LeptonThread::run()
 			qDebug() << "done reading, resets: " << resets;
 		}
 
-    
-    if((double)currFrameTime < ((double)lastFrameTime + 1000.0F/(double)FPS))
-      continue;
 
+    // Drop frame if it's not time for a new one
+    if((double)currFrameTime < ((double)lastFrameTime - frameDelay + 1000.0F/(double)FPS))
+      continue;
+    
+    //printf("currFrameTime %lld, lastFrameTime %lld, frameDelay %lld, framePeriod %g\n", 
+    //        currFrameTime, lastFrameTime, frameDelay, 1000.0/(double)FPS);
+    
 		frameBuffer = (uint16_t *)result;
 		uint16_t value;
 		uint16_t minValue = 65535;
@@ -351,6 +357,10 @@ void LeptonThread::run()
 #if LOG_FRAMES
     writeFrameToLog();
 #endif
+
+    frameDelay += currFrameTime - lastFrameTime - 1000.0F/FPS;
+    if(frameDelay > 1000.0F/FPS || frameDelay < -1000.0F/FPS)
+      frameDelay = 0;
     
     lastFrameTime = currFrameTime;
 

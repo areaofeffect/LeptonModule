@@ -17,6 +17,14 @@ int main( int argc, char **argv )
 	//create the app
 	QApplication a( argc, argv );
 
+  if (argc > 1)
+    {
+      LeptonThread::baseID = atoi(argv[1]);
+      printf("BaseID is %d\n", LeptonThread::baseID);
+    }
+  else
+    printf("No BaseID argument. Using %d\n", LeptonThread::baseID);
+  
 	QWidget *myWidget = new QWidget;
 	myWidget->setGeometry(400, 300, 340, 290);
 
