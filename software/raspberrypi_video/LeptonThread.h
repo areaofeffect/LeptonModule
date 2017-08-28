@@ -12,8 +12,8 @@
 #include <MQTTAsync.h>
 
 #define DISPLAY_IMAGE 0
-#define PUBLISH_MQTT 0
-#define LOG_FRAMES 1
+#define PUBLISH_MQTT 1
+#define LOG_FRAMES 0
 
 
 #define PACKET_SIZE 164
@@ -32,7 +32,7 @@ class LeptonThread : public QThread
 public:
   static int baseID;
 
-  LeptonThread();
+  LeptonThread(bool aDisplayImage, bool aPublishMQTT, bool aLogFrames);
   ~LeptonThread();
 
   void run();
@@ -46,6 +46,9 @@ signals:
 
 private:
 
+  bool mDisplayImage;
+  bool mPublishMQTT;
+  bool mLogFrames;
   QImage myImage;
 
   uint8_t result[PACKET_SIZE*PACKETS_PER_FRAME];

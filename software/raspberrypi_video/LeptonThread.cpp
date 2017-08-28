@@ -253,8 +253,13 @@ void LeptonThread::writeFrameToLog()
   fprintf(logFile, "%s\n", frameStr);
 }
 
-LeptonThread::LeptonThread() : QThread()
+LeptonThread::LeptonThread(bool aDisplayImage, bool aPublishMQTT, bool aLogFrames) : QThread()
 {
+  mDisplayImage = aDisplayImage;
+  mPublishMQTT = aPublishMQTT;
+  mLogFrames = aLogFrames;
+
+  printf("Created Lepton thread with displayImage=%d, publishMQTT=%d, logFrames=%d\n", mDisplayImage, mPublishMQTT, mLogFrames);
   logFile = NULL;
   lastFrameTime = getCurrSecsPlusMillis();
   frameDelay = 0;
@@ -266,20 +271,20 @@ LeptonThread::~LeptonThread() {
 
 void LeptonThread::run()
 {
-#if PUBLISH_MQTTT
-  int rc;
+  if (mPublishMQTT)
+    {
+      int rc;
   
-  if ((rc = MQTTAsync_connect(client, &conn_opts)) != MQTTASYNC_SUCCESS)
-	{
-		printf("Failed to start connect, return code %d\n", rc);
-		exit(EXIT_FAILURE);
-	}
-#endif //PUBLISH_MQTT
+      if ((rc = MQTTAsync_connect(client, &conn_opts)) != MQTTASYNC_SUCCESS)
+        {
+          printf("Failed to start connect, return code %d\n", rc);
+          exit(EXIT_FAILURE);
+        }
+    }
 
-#if DISPLAY_IMAGE
-	//create the initial image
-	myImage = QImage(80, 60, QImage::Format_RGB888);
-#endif
+  if(mDisplayImage)
+    //create the initial image
+    myImage = QImage(80, 60, QImage::Format_RGB888);
   
 	//open spi port
 	SpiOpenPort(0);
@@ -346,53 +351,49 @@ void LeptonThread::run()
 			}
 		}
 
-#if PUBLISH_MQTT
-    // Publish this frame asyncrhonously over MQTT. The buffer is copied
-    // by the MQTT library.
-    if (MQTTAsync_isConnected(client)) {
+    if (mPublishMQTT == 1) {
+      // Publish this frame asyncrhonously over MQTT. The buffer is copied
+      // by the MQTT library.
+      if (MQTTAsync_isConnected(client)) {
         publishFrame();
       }
-#endif
+    }
 
-#if LOG_FRAMES
-    writeFrameToLog();
-#endif
-
+    if (mLogFrames)
+      writeFrameToLog();
+ 
     frameDelay += currFrameTime - lastFrameTime - 1000.0F/FPS;
     if(frameDelay > 1000.0F/FPS || frameDelay < -1000.0F/FPS)
       frameDelay = 0;
-    
+
     lastFrameTime = currFrameTime;
 
 
-#if DISPLAY_IMAGE
-		float diff = maxValue - minValue;
-		float scale = 255/diff;
-		QRgb color;
-		for(int i=0;i<FRAME_SIZE_UINT16;i++) {
-			if(i % PACKET_SIZE_UINT16 < 2) {
-				continue;
-			}
-			value = (frameBuffer[i] - minValue) * scale;
-			const int *colormap = colormap_ironblack;
-			color = qRgb(colormap[3*value], colormap[3*value+1], colormap[3*value+2]);
-			column = (i % PACKET_SIZE_UINT16 ) - 2;
-			row = i / PACKET_SIZE_UINT16;
-			myImage.setPixel(column, row, color);
-		}
-
-		//lets emit the signal for update
-		emit updateImage(myImage);
-#endif // DISPLAY_IMAGE
-    
+    if (mDisplayImage) {
+      float diff = maxValue - minValue;
+      float scale = 255/diff;
+      QRgb color;
+      for(int i=0;i<FRAME_SIZE_UINT16;i++) {
+        if(i % PACKET_SIZE_UINT16 < 2) {
+          continue;
+        }
+        value = (frameBuffer[i] - minValue) * scale;
+        const int *colormap = colormap_ironblack;
+        color = qRgb(colormap[3*value], colormap[3*value+1], colormap[3*value+2]);
+        int column = (i % PACKET_SIZE_UINT16 ) - 2;
+        int row = i / PACKET_SIZE_UINT16;
+        myImage.setPixel(column, row, color);
+      }
+      //lets emit the signal for update
+      emit updateImage(myImage);
+    }
 	}
-	
+
 	//finally, close SPI port just bcuz
 	SpiClosePort(0);
 
-#if PUBLISH_MQTT
-  MQTTAsync_destroy(&client);
-#endif
+  if (mPublishMQTT)
+    MQTTAsync_destroy(&client);
 }
 
 void LeptonThread::performFFC() {
