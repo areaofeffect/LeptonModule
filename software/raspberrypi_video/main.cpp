@@ -18,7 +18,7 @@
 enum  optionIndex { UNKNOWN, HELP, MQTT, LOG, DISPLAY};
 const option::Descriptor usage[] =
 {
- {UNKNOWN, 0,"" , ""    ,option::Arg::None, "USAGE: example [options]\n\n"
+ {UNKNOWN, 0,"" , ""    ,option::Arg::None, "USAGE: raspberrypi_video <baseID> [options]\n\n"
                                             "Options:" },
  {HELP,    0,"" , "help",option::Arg::None, "  --help  \tPrint usage and exit." },
  {MQTT,    0,"m", "mqtt",option::Arg::None, "  --mqtt, -m  \tPublish to MQTT." },

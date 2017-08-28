@@ -1,20 +1,20 @@
 #!/bin/bash
 
-LOG_SCRIPT=log-lepton.sh
-LOCAL_LOG_SCRIPT_LOCATION=.
-PI_LOG_SCRIPT_LOCATION=/home/pi
+RUN_SCRIPT=run-lepton.sh
+LOCAL_RUN_SCRIPT_LOCATION=.
+PI_RUN_SCRIPT_LOCATION=/home/pi
 
 PI_DATA_ROOT=/home/pi/lepton-data
 LOCAL_DATA_ROOT=lepton-data
 
-for lepton in l1 
+for lepton in l1 l2
 do
     case "$1" in
 	start)
-	    SCP_CMD="scp $LOCAL_LOG_SCRIPT_LOCATION/$LOG_SCRIPT $lepton:$PI_LOG_SCRIPT_LOCATION"
+	    SCP_CMD="scp $LOCAL_RUN_SCRIPT_LOCATION/$RUN_SCRIPT $lepton:$PI_RUN_SCRIPT_LOCATION"
 	    echo "SCP command is " $SCP_CMD
 	    $SCP_CMD
-	    START_CMD="ssh $lepton 'nohup $PI_LOG_SCRIPT_LOCATION/$LOG_SCRIPT < /dev/null 1>&2 &'"
+	    START_CMD="ssh $lepton 'nohup $PI_RUN_SCRIPT_LOCATION/$RUN_SCRIPT < /dev/null 1>&2 &'"
 	    echo "Start logging command is: " $START_CMD
 	    eval $START_CMD
 	    ;;

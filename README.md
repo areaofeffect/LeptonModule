@@ -1,3 +1,17 @@
+Inspiren's Lepton Module
+========================
+The executable is in software/raspberrypi_video.
+Before running it over a remote session, you need to do run "export DISPLAY:0.0" to redirect to the Pi's local display.
+The first non-optional parameter is the <basedID> (e.g. 1).
+Then there are three options:
+-m publish messages over MQTT to the inspiren server
+-d display the data on screen as per the original app's behavior
+-l log data to csv files in the local director's lepton-data director
+
+There are two convenience scripts:
+1. ctl-leptons.sh can be used to "start" and "stop" the raspberrypi_video executable remotely. It can also be used to "collect" log files. This script uses a helper script called "run-lepton.sh" in which the mode flags (i.e. -l, -m, -d) can be specified. The lepton hostnames should be specified in the script (e.g. l1 and l2 which can be defined in a ~/.ssh/config as Hosts to allow key-based login).
+2. remote-compile.sh will rsync over the working directory to a pi (hostname should be passed as arg 1) for compilation.
+
 LeptonModule
 ============
 The FLIR Lepton™ is the most compact longwave infrared (LWIR) sensor available as an OEM product. It packs a resolution of 80 × 60 pixels into a camera body that is smaller than a dime. This revolutionary camera core is poised to equip a new generation of mobile and handheld devices, as well as small fixed-mount camera systems, with thermal imaging capabilities never seen before. Lepton contains a breakthrough lens fabricated in wafer form, along with a microbolometer focal plane array (FPA) and advanced thermal image processing. 
