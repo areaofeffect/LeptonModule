@@ -1,7 +1,7 @@
 Inspiren's Lepton Module
 ========================
 The executable is in software/raspberrypi_video.
-Before running it over a remote session, you need to do run "export DISPLAY:0.0" to redirect to the Pi's local display.
+Before running it over a remote session, you need to run "export DISPLAY=:0.0" to redirect to the Pi's local display.
 The first non-optional parameter is the <basedID> (e.g. 1).
 Then there are three options:
 -m publish messages over MQTT to the inspiren server
