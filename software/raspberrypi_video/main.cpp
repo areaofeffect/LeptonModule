@@ -15,13 +15,14 @@
 
 #include "optionparser.h"
 
-enum  optionIndex { UNKNOWN, HELP, MQTT, LOG, DISPLAY};
+enum  optionIndex { UNKNOWN, HELP, MQTT, TEST, LOG, DISPLAY};
 const option::Descriptor usage[] =
 {
  {UNKNOWN, 0,"" , ""    ,option::Arg::None, "USAGE: raspberrypi_video <baseID> [options]\n\n"
                                             "Options:" },
  {HELP,    0,"" , "help",option::Arg::None, "  --help  \tPrint usage and exit." },
  {MQTT,    0,"m", "mqtt",option::Arg::None, "  --mqtt, -m  \tPublish to MQTT." },
+ {TEST,    0,"t", "test",option::Arg::None, "  --test, -t  \tPrint MQTT and LOG data only." },
  {LOG,    0,"l", "log",option::Arg::None, "  --log, -l  \tLog frames." },
  {DISPLAY,    0,"d", "display",option::Arg::None, "  --display, -d  \tDisplay frames on screen." },
  {0,0,0,0,0,0}
@@ -45,11 +46,12 @@ int main( int argc, char **argv )
     return 0;
   }
 
+  int lBaseID = 0;
   if (parse.nonOptionsCount() == 0)
-    printf("No BaseID argument. Using %d\n", LeptonThread::baseID);
+    printf("No BaseID argument. Using %d.", lBaseID);
   else if (parse.nonOptionsCount() >= 1) {
-    LeptonThread::baseID = atoi(parse.nonOption(0));
-    printf("BaseID is %d\n", LeptonThread::baseID);
+    lBaseID = atoi(parse.nonOption(0));
+    printf("BaseID is %d\n", lBaseID);
   }
 
   QWidget *myWidget = NULL;
@@ -83,7 +85,7 @@ int main( int argc, char **argv )
 
 	//create a thread to gather SPI data
 	//when the thread emits updateImage, the label should update its image accordingly
-	LeptonThread *thread = new LeptonThread(options[DISPLAY], options[MQTT], options[LOG]);
+    LeptonThread *thread = new LeptonThread(lBaseID, options[DISPLAY], options[MQTT], options[LOG], options[TEST]);
 
   if (options[DISPLAY]){
     QObject::connect(thread, SIGNAL(updateImage(QImage)), myLabel, SLOT(setImage(QImage)));

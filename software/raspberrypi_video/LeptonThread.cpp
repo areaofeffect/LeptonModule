@@ -18,7 +18,7 @@
 
 // MQTT
 #define ADDRESS     "tcp://144.121.64.136:1883"
-#define CLIENTID    "LeptonPi"
+#define CLIENT_FORMAT_STR    "LeptonPi_%d"
 #define TOPIC       "lepton"
 #define QOS         0
 #define TIMEOUT     10000L
@@ -112,8 +112,6 @@ long long getCurrSecsPlusMillis(void)
 }
 
 
-int LeptonThread::baseID = 0;
-
 //from: https://stackoverflow.com/questions/2056499/transform-an-array-of-integers-into-a-string?rq=1
 int LeptonThread::frameBufferToString(char* output, int output_length)
 {
@@ -153,10 +151,13 @@ int LeptonThread::frameBufferToString(char* output, int output_length)
 
  void LeptonThread::setupMQTT(void)
 {
+  char clientStr[128];
   conn_opts = MQTTAsync_connectOptions_initializer;
-	
+
+  sprintf(clientStr, CLIENT_FORMAT_STR, mBaseID);
+  
   // Set up the MQTT Connection and Connect asynchronously
-	MQTTAsync_create(&client, ADDRESS, CLIENTID, MQTTCLIENT_PERSISTENCE_NONE, NULL);
+  MQTTAsync_create(&client, ADDRESS, clientStr, MQTTCLIENT_PERSISTENCE_NONE, NULL);
 
   MQTTAsync_setCallbacks(client, NULL, connlost, NULL, NULL);
 
@@ -168,44 +169,41 @@ int LeptonThread::frameBufferToString(char* output, int output_length)
 }
 
 //from: https://stackoverflow.com/questions/3756323/getting-the-current-time-in-milliseconds
-void LeptonThread::publishFrame(void)
+void LeptonThread::publishFrameToMQTT(void)
 {
-  int strIdx = sprintf(frameStr, "base_id|%03d|timestamp|%lld|pixels|",
-                       baseID, currFrameTime);
+    int strIdx = sprintf(frameStr, "base_id|%03d|timestamp|%lld|pixels|",
+                       mBaseID, currFrameTime);
+    int frameStrLen = frameBufferToString(frameStr + strIdx,  MQTT_PAYLOAD_SIZE - strIdx);
+    QByteArray frameStrBytes(frameStr + strIdx);
+    QByteArray compressedBytes = qCompress(frameStrBytes).toBase64();
+    //Add 1 byte for the \0 termination, which size() doesn't include
+    qstrncpy(frameStr + strIdx, compressedBytes, compressedBytes.size() + 1);
 
-  int frameStrLen = frameBufferToString(frameStr + strIdx,  MQTT_PAYLOAD_SIZE - strIdx);
-  QByteArray frameStrBytes(frameStr + strIdx, frameStrLen);
-  QByteArray compressedBytes = qCompress(frameStrBytes).toBase64();
-  qstrncpy(frameStr + strIdx, compressedBytes, compressedBytes.size());
-  
-  //  printf("About to send frame with %d compressed (%d uncompressed) bytes\n",
-  //     compressedBytes.size(), frameStrLen);
+    if (!mTest) {
+        // Prepare to get the reponse and then send
+        MQTTAsync_responseOptions opts = MQTTAsync_responseOptions_initializer;
+        MQTTAsync_message pubmsg = MQTTAsync_message_initializer;
+        int rc;
 
-  //    printf("About to send frame with %d compressed / %d uncompressed bytes: %s\n",
-  //     compressedBytes.size(), frameStrLen, frameStr);
+        opts.onSuccess = onSend;
+        opts.context = client;
 
- 
-  // Prepare to get the reponse and then send
-  MQTTAsync_responseOptions opts = MQTTAsync_responseOptions_initializer;
-	MQTTAsync_message pubmsg = MQTTAsync_message_initializer;
-	int rc;
-  
-	opts.onSuccess = onSend;
-	opts.context = client;
+        pubmsg.payload = frameStr;
+        pubmsg.payloadlen = strlen(frameStr);
+        pubmsg.qos = QOS;
+        pubmsg.retained = 0;
 
-	pubmsg.payload = frameStr;
-	pubmsg.payloadlen = strlen(frameStr);
-	pubmsg.qos = QOS;
-	pubmsg.retained = 0;
-
-	if ((rc = MQTTAsync_sendMessage(client, TOPIC, &pubmsg, &opts)) != MQTTASYNC_SUCCESS)
-	{
-		printf("Failed to start sendMessage, return code %d\n", rc);
-		exit(EXIT_FAILURE);
-	}
+        if ((rc = MQTTAsync_sendMessage(client, TOPIC, &pubmsg, &opts)) != MQTTASYNC_SUCCESS)
+        {
+            printf("Failed to start sendMessage, return code %d\n", rc);
+            exit(EXIT_FAILURE);
+        }
+    }
+    else {
+        printf("Frame to publish (%d compressed, %d uncompressed): %s\n",
+            compressedBytes.size(), frameStrLen, frameStr);
+    }
 }
-
-
 
 void LeptonThread::writeFrameToLog()
 {
@@ -214,56 +212,66 @@ void LeptonThread::writeFrameToLog()
   char sysCall[1024];
   time_t t = (time_t)(currFrameTime / 1000LL);
 
-  if (strftime(dirName, sizeof(dirName), DIR_FORMAT, gmtime(&t)) == 0) {
-    (void) fprintf(stderr,  "strftime(3): cannot format supplied "
-                   "date/time into buffer of size %u using: '%s'\n",
-                   sizeof(dirName), DIR_FORMAT);
-    return;
-  }
-
-  if (strftime(correctFileName, sizeof(correctFileName), FILE_FORMAT, gmtime(&t)) == 0) {
-    (void) fprintf(stderr,  "strftime(3): cannot format supplied "
-                   "date/time into buffer of size %u using: '%s'\n",
-                   sizeof(correctFileName), FILE_FORMAT);
-    return;
-  }
-
-  // Is it time for a new file?
-  if(strcmp(correctFileName, logFileName))
-    {
-      printf("Opening %s for logging.\n", correctFileName);
-            
-      //Yes, close the current file
-      if(logFile != NULL)
-        fclose(logFile);
-
-      sprintf(sysCall, "mkdir -p %s", dirName);
-      system(sysCall);
-
-      //Open the new file
-      logFile = fopen(correctFileName, "w");
-      if(logFile == NULL)
+  if (!mTest) {
+      if (strftime(dirName, sizeof(dirName), DIR_FORMAT, gmtime(&t)) == 0) {
+        (void) fprintf(stderr,  "strftime(3): cannot format supplied "
+                       "date/time into buffer of size %u using: '%s'\n",
+                       sizeof(dirName), DIR_FORMAT);
         return;
-      
-      strncpy(logFileName, correctFileName, sizeof(logFileName));
-    }
+      }
+
+      if (strftime(correctFileName, sizeof(correctFileName), FILE_FORMAT, gmtime(&t)) == 0) {
+        (void) fprintf(stderr,  "strftime(3): cannot format supplied "
+                       "date/time into buffer of size %u using: '%s'\n",
+                       sizeof(correctFileName), FILE_FORMAT);
+        return;
+      }
+
+      // Is it time for a new file?
+      if(strcmp(correctFileName, logFileName))
+        {
+          printf("Opening %s for logging.\n", correctFileName);
+
+          //Yes, close the current file
+          if(logFile != NULL)
+            fclose(logFile);
+
+          sprintf(sysCall, "mkdir -p %s", dirName);
+          system(sysCall);
+
+          //Open the new file
+          logFile = fopen(correctFileName, "w");
+          if(logFile == NULL)
+            return;
+
+          strncpy(logFileName, correctFileName, sizeof(logFileName));
+        }
+  }
   
-  int strIdx = sprintf(frameStr, "%03d, %lld, ", baseID, currFrameTime);
+  int strIdx = sprintf(frameStr, "%03d, %lld, ", mBaseID, currFrameTime);
   frameBufferToString(frameStr + strIdx,  MQTT_PAYLOAD_SIZE - strIdx);
-  fprintf(logFile, "%s\n", frameStr);
+
+  if (!mTest)
+      fprintf(logFile, "%s\n", frameStr);
+  else
+      printf("Frame to log: %s\n", frameStr);
 }
 
-LeptonThread::LeptonThread(bool aDisplayImage, bool aPublishMQTT, bool aLogFrames) : QThread()
+LeptonThread::LeptonThread(int aBaseID, bool aDisplayImage, bool aPublishMQTT,
+                           bool aLogFrames, bool aTest) : QThread()
 {
+  mBaseID = aBaseID;
   mDisplayImage = aDisplayImage;
   mPublishMQTT = aPublishMQTT;
   mLogFrames = aLogFrames;
+  mTest = aTest;
 
   printf("Created Lepton thread with displayImage=%d, publishMQTT=%d, logFrames=%d\n", mDisplayImage, mPublishMQTT, mLogFrames);
   logFile = NULL;
   lastFrameTime = getCurrSecsPlusMillis();
   frameDelay = 0;
-  setupMQTT();
+  if(~!mTest)
+      setupMQTT();
 }
 
 LeptonThread::~LeptonThread() {
@@ -271,7 +279,7 @@ LeptonThread::~LeptonThread() {
 
 void LeptonThread::run()
 {
-  if (mPublishMQTT)
+  if (mPublishMQTT && !mTest)
     {
       int rc;
   
@@ -300,10 +308,10 @@ void LeptonThread::run()
 				j = -1;
 				resets += 1;
 				usleep(1000);
-				//Note: we've selected 750 resets as an arbitrary limit, since there should never
-        //be 750 "null" packets between two valid transmissions at the current poll rate
+                //Note: we've selected 750 resets as an arbitrary limit, since there should never
+                //be 750 "null" packets between two valid transmissions at the current poll rate
 				//By polling faster, developers may easily exceed this count, and the down period
-        //between frames may then be flagged as a loss of sync
+                //between frames may then be flagged as a loss of sync
 				if(resets == 750) {
 					SpiClosePort(0);
 					usleep(750000);
@@ -351,11 +359,11 @@ void LeptonThread::run()
 			}
 		}
 
-    if (mPublishMQTT == 1) {
+    if (mPublishMQTT) {
       // Publish this frame asyncrhonously over MQTT. The buffer is copied
       // by the MQTT library.
-      if (MQTTAsync_isConnected(client)) {
-        publishFrame();
+      if (mTest || MQTTAsync_isConnected(client)) {
+        publishFrameToMQTT();
       }
     }
 
@@ -392,7 +400,7 @@ void LeptonThread::run()
 	//finally, close SPI port just bcuz
 	SpiClosePort(0);
 
-  if (mPublishMQTT)
+  if (mPublishMQTT && !mTest)
     MQTTAsync_destroy(&client);
 }
 

@@ -30,9 +30,8 @@ class LeptonThread : public QThread
   Q_OBJECT;
 
 public:
-  static int baseID;
-
-  LeptonThread(bool aDisplayImage, bool aPublishMQTT, bool aLogFrames);
+  LeptonThread(int aBaseID, bool aDisplayImage,
+               bool aPublishMQTT, bool aLogFrames, bool aTest);
   ~LeptonThread();
 
   void run();
@@ -45,10 +44,13 @@ signals:
   void updateImage(QImage);
 
 private:
+  int mBaseID;
 
   bool mDisplayImage;
   bool mPublishMQTT;
   bool mLogFrames;
+  bool mTest;
+
   QImage myImage;
 
   uint8_t result[PACKET_SIZE*PACKETS_PER_FRAME];
@@ -64,7 +66,7 @@ private:
   int token;
   MQTTAsync_connectOptions conn_opts;
   void setupMQTT(void);
-  void publishFrame(void);
+  void publishFrameToMQTT(void);
 
   char logFileName[1024];
   FILE *logFile;
